@@ -154,7 +154,7 @@ export default function FloatingRadar() {
                                     ) : (
                                         <div className="space-y-4">
                                             {results?.map((room) => (
-                                                <Link href={`/room/${room._id}`} onClick={handleClose} key={room._id} className="block bg-gray-50 border border-gray-100 p-4 rounded-2xl hover:border-primary/50 hover:bg-primary-light/20 transition-all group">
+                                                <Link href={`/app/rooms/${room._id}`} onClick={handleClose} key={room._id} className="block bg-gray-50 border border-gray-100 p-4 rounded-2xl hover:border-primary/50 hover:bg-primary-light/20 transition-all group">
                                                     <div className="flex justify-between items-start mb-2">
                                                         <h4 className="font-bold text-gray-900 text-sm line-clamp-2 pr-4 group-hover:text-primary transition-colors">{room.title}</h4>
                                                         <span className="shrink-0 bg-white border border-gray-200 text-xs px-2 py-1 rounded-lg font-medium text-gray-600 flex items-center gap-1">

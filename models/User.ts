@@ -17,6 +17,9 @@ const userSchema = new Schema(
             isSubscriptionActive: { type: Boolean, default: false },
             subscriptionValidUntil: { type: Date },
             qrCodePaymentUrl: { type: String },
+            bankId: { type: String }, // Mã ngân hàng (VD: MB, VCB, TCB...)
+            bankAccountNumber: { type: String }, // Số tài khoản
+            bankAccountName: { type: String }, // Tên chủ tài khoản
         }
     },
     { timestamps: true }

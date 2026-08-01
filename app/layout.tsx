@@ -6,6 +6,7 @@ import Footer from "@/components/layout/Footer";
 import FloatingRadar from "@/components/common/FloatingRadar";
 import GlobalChat from "@/components/common/GlobalChat";
 import AuthProvider from "@/components/providers/AuthProvider";
+import {Toaster} from "react-hot-toast";
 
 
 const inter = Inter({ subsets: ["vietnamese"] });
@@ -26,6 +27,19 @@ export default function RootLayout({
                 <AuthProvider>
                     <Header />
                         <main className="flex-1">{children}</main>
+                            <Toaster
+                                position="top-right"
+                                toastOptions={{
+                                    duration: 3000,
+                                    style: {
+                                        background: '#fff',
+                                        color: '#363636',
+                                        borderRadius: '12px',
+                                        boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                                        fontWeight: '500',
+                                    },
+                                }}
+                            />
                         <FloatingRadar />
                         <GlobalChat />
                     <Footer />

@@ -1,131 +1,326 @@
+/* eslint-disable @next/next/no-img-element */
 "use client";
 
-import { X, Minus, Send, Image as ImageIcon, Smile } from 'lucide-react';
-import { useState } from 'react';
+import { X, Minus, Send, Image as ImageIcon, Smile, Loader2 } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { notify } from "@/utils/toast";
+import { useSession } from 'next-auth/react';
+import { pusherClient } from '@/lib/pusher';
 
-interface ChatWidgetProps {
-    isOpen: boolean;
-    onClose: () => void;
-    landlordName: string;
-    avatar: string;
+// Định nghĩa kiểu dữ liệu cho 1 tin nhắn hiển thị UI
+interface Message {
+    id: string | number;
+    text: string;
+    sender: 'user' | 'landlord';
+    time: string;
+    imageUrl?: string;
 }
 
-export default function ChatWidget({ isOpen, onClose, landlordName, avatar }: ChatWidgetProps) {
-    const [message, setMessage] = useState('');
+// Định nghĩa kiểu dữ liệu thô từ Database
+interface DBRawMessage {
+    _id: string;
+    text?: string;
+    imageUrl?: string;
+    senderId: string;
+    createdAt: string | Date;
+}
 
-    // Trạng thái quản lý việc thu nhỏ thành bong bóng chat
-    const [isMinimized, setIsMinimized] = useState(true);
+interface ChatWidgetProps {
+    receiverId: string;
+    onClose: () => void;
+    onMinimize: () => void;
+    chatName?: string;
+    avatar?: string;
+}
 
-    // Giả lập có 1 tin nhắn chưa đọc khi thu nhỏ
-    const unreadCount = 1;
+export default function ChatWidget({
+                                       receiverId,
+                                       onClose,
+                                       onMinimize,
+                                       chatName = "Tin nhắn",
+                                       avatar = "https://api.dicebear.com/7.x/notionists/svg?seed=Support"
+                                   }: ChatWidgetProps) {
 
-    // Nếu widget không được mở, không render gì cả
-    if (!isOpen) return null;
+    const { data: session } = useSession();
+    const currentUserId = session?.user?.id;
 
-    // Giao diện khi bị THU NHỎ (Bong bóng chat)
-    if (isMinimized) {
-        return (
-            <div className="fixed bottom-40 right-6 z-50 flex flex-col gap-4 animate-in zoom-in duration-200">
-                <button
-                    onClick={() => setIsMinimized(false)}
-                    className="relative w-14 h-14 rounded-full shadow-xl hover:scale-105 transition-transform p-0 overflow-hidden border-2 border-white cursor-pointer"
-                    title={`Mở chat với ${landlordName}`}
-                >
-                    {/* Avatar chủ trọ */}
-                    <img src={avatar} alt={landlordName} className="w-full h-full object-cover" />
+    const [messageInput, setMessageInput] = useState('');
+    const [messages, setMessages] = useState<Message[]>([]);
+    const [isUploading, setIsUploading] = useState(false);
 
-                    {/* Badge thông báo số lượng tin nhắn chưa đọc (Màu đỏ) */}
-                    {unreadCount > 0 && (
-                        <span className="absolute -top-1 -right-1 bg-danger text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full border-2 border-white">
-              {unreadCount}
-            </span>
-                    )}
-                </button>
-            </div>
-        );
-    }
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // Giao diện khi MỞ RỘNG (Khung chat bình thường)
+    useEffect(() => {
+        const loadChatHistory = async () => {
+            if (currentUserId && receiverId) {
+                try {
+                    const res = await fetch(`/api/messages?receiverId=${receiverId}`);
+                    const json = await res.json();
+
+                    if (json.success) {
+                        const formattedMessages = json.data.map((msg: DBRawMessage) => ({
+                            id: msg._id,
+                            text: msg.text || '',
+                            imageUrl: msg.imageUrl || '',
+                            sender: msg.senderId === currentUserId ? 'user' : 'landlord',
+                            time: new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                        }));
+                        setMessages(formattedMessages);
+                    }
+                } catch (error) {
+                    console.error("Lỗi tải lịch sử chat:", error);
+                }
+            }
+        };
+
+        loadChatHistory();
+    }, [currentUserId, receiverId]);
+
+    useEffect(() => {
+        if (!currentUserId || !receiverId) return;
+
+        const channel = pusherClient.subscribe(currentUserId);
+
+        const handleNewMessage = (incomingMsg: DBRawMessage) => {
+            if (incomingMsg.senderId === receiverId) {
+                const formattedMsg: Message = {
+                    id: incomingMsg._id,
+                    text: incomingMsg.text || '',
+                    imageUrl: incomingMsg.imageUrl || '',
+                    sender: 'landlord',
+                    time: new Date(incomingMsg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                };
+                setMessages((prev) => [...prev, formattedMsg]);
+            }
+        };
+
+        channel.bind('new-message', handleNewMessage);
+
+        return () => {
+            channel.unbind('new-message', handleNewMessage);
+        };
+    }, [currentUserId, receiverId]);
+
+    useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [messages]);
+
+    const handleSendMessage = async () => {
+        if (!messageInput.trim()) return;
+        if (!currentUserId) {
+            notify.error('Vui lòng đăng nhập để gửi tin nhắn!');
+            return;
+        }
+        if (!receiverId) {
+            notify.error('Không tìm thấy thông tin người nhận!');
+            return;
+        }
+
+        const textToSend = messageInput.trim();
+        setMessageInput('');
+
+        const tempMsg: Message = {
+            id: Date.now().toString(),
+            text: textToSend,
+            sender: 'user',
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        };
+        setMessages(prev => [...prev, tempMsg]);
+
+        try {
+            const res = await fetch('/api/messages', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    receiverId: receiverId,
+                    text: textToSend
+                })
+            });
+
+            const data = await res.json();
+            if (!data.success) {
+                notify.error("Lỗi từ Server: " + data.error);
+                setMessages(prev => prev.filter(msg => msg.id !== tempMsg.id));
+            }
+        } catch (error) {
+            notify.error("Lỗi kết nối tới máy chủ");
+            setMessages(prev => prev.filter(msg => msg.id !== tempMsg.id));
+        }
+    };
+
+    const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        setIsUploading(true);
+
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const res = await fetch('/api/upload', {
+                method: 'POST',
+                body: formData,
+            });
+
+            const data = await res.json();
+
+            if (data.success) {
+                const newImgMsg: Message = {
+                    id: Date.now().toString(),
+                    text: '',
+                    sender: 'user',
+                    imageUrl: data.imageUrl,
+                    time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                };
+                setMessages(prev => [...prev, newImgMsg]);
+
+                try {
+                    const msgRes = await fetch('/api/messages', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            receiverId: receiverId,
+                            text: '',
+                            imageUrl: data.imageUrl
+                        })
+                    });
+
+                    const msgData = await msgRes.json();
+                    if (!msgData.success) {
+                        notify.error("Lỗi lưu ảnh vào tin nhắn!");
+                        setMessages(prev => prev.filter(msg => msg.id !== newImgMsg.id));
+                    }
+                } catch (err) {
+                    notify.error("Lỗi mạng khi gửi ảnh!");
+                    setMessages(prev => prev.filter(msg => msg.id !== newImgMsg.id));
+                }
+
+            } else {
+                notify.error("Lỗi tải ảnh lên server!");
+            }
+        } catch (error) {
+            notify.error("Lỗi mạng khi tải ảnh!");
+        } finally {
+            setIsUploading(false);
+        }
+    };
+
     return (
-        <div className="fixed bottom-0 right-6 md:bottom-24 w-80 bg-white rounded-t-2xl md:rounded-2xl shadow-2xl border border-gray-200 z-50 flex flex-col overflow-hidden animate-in slide-in-from-bottom-5 duration-300">
-
-            {/* Chat Header */}
+        <div className=" pointer-events-auto w-80 bg-white shadow-2xl border border-gray-200 rounded-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-5 duration-300"
+             style={{ zIndex: 9999 }}
+        >
             <div className="bg-primary p-3 flex items-center justify-between text-white shadow-sm">
                 <div className="flex items-center gap-3">
                     <div className="relative">
-                        <img src={avatar} alt={landlordName} className="w-10 h-10 rounded-full bg-white border border-primary-light object-cover" />
+                        <img src={avatar} alt={chatName} className="w-10 h-10 rounded-full bg-white border border-primary-light object-cover" />
                         <span className="absolute bottom-0 right-0 w-3 h-3 bg-success border-2 border-white rounded-full"></span>
                     </div>
                     <div>
-                        <div className="font-bold text-sm leading-tight">{landlordName}</div>
+                        <div className="font-bold text-sm leading-tight line-clamp-1">{chatName}</div>
                         <div className="text-xs text-primary-light">Đang hoạt động</div>
                     </div>
                 </div>
 
-                {/* Nhóm nút hành động: Thu nhỏ & Đóng */}
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1 shrink-0">
                     <button
-                        onClick={() => setIsMinimized(true)}
-                        className="p-1.5 hover:bg-primary-hover rounded-full transition-colors tooltip"
-                        title="Thu nhỏ"
+                        type="button"
+                        onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            onMinimize();
+                        }}
+                        className="relative z-50 p-1.5 hover:bg-primary-hover rounded-full transition-colors tooltip cursor-pointer"
+                        title="Thu nhỏ thành bong bóng"
                     >
                         <Minus className="w-5 h-5" />
                     </button>
                     <button
-                        onClick={onClose}
-                        className="p-1.5 hover:bg-primary-hover rounded-full transition-colors tooltip"
-                        title="Đóng"
+                        type="button"
+                        onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            onClose();
+                        }}
+                        className="relative z-50 p-1.5 hover:bg-red-500 rounded-full transition-colors tooltip cursor-pointer"
+                        title="Đóng chat"
                     >
                         <X className="w-5 h-5" />
                     </button>
                 </div>
             </div>
 
-            {/* Chat Body */}
-            <div className="h-72 p-4 bg-gray-50 overflow-y-auto flex flex-col gap-3">
-                <div className="text-center text-[11px] text-gray-400 mb-2">Hôm nay 10:24 AM</div>
+            <div className="h-80 p-4 bg-gray-50 overflow-y-auto flex flex-col gap-4">
+                <div className="text-center text-[11px] text-gray-400 mb-2">Hôm nay</div>
 
-                {/* Tin nhắn từ chủ trọ */}
-                <div className="flex items-end gap-2">
-                    <img src={avatar} className="w-7 h-7 rounded-full object-cover shadow-sm" alt="avatar" />
-                    <div className="bg-white border border-gray-100 p-2.5 rounded-2xl rounded-bl-none text-sm text-gray-700 max-w-[75%] shadow-sm">
-                        Chào bạn, bạn đang tìm trọ ở khu vực Gia Sàng à? Mình có thể giúp gì cho bạn không?
+                {messages.length === 0 ? (
+                    <div className="flex-1 flex flex-col items-center justify-center opacity-50">
+                        <Smile className="w-10 h-10 text-gray-400 mb-2" />
+                        <p className="text-xs text-gray-500">Hãy gửi lời chào đầu tiên!</p>
                     </div>
-                </div>
-
-                {/* Khoảng trống để tin nhắn của User hiển thị sau này */}
+                ) : (
+                    messages.map((msg) => (
+                        <div key={msg.id} className={`flex items-end gap-2 ${msg.sender === 'user' ? 'flex-row-reverse' : ''}`}>
+                            {msg.sender === 'landlord' && (
+                                <img src={avatar} className="w-7 h-7 rounded-full object-cover shadow-sm shrink-0" alt="avatar" />
+                            )}
+                            <div className={`flex flex-col ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}>
+                                <div className={`p-2.5 text-sm max-w-[220px] shadow-sm ${
+                                    msg.sender === 'user'
+                                        ? 'bg-primary text-white rounded-2xl rounded-br-none'
+                                        : 'bg-white border border-gray-200 text-gray-700 rounded-2xl rounded-bl-none'
+                                }`}>
+                                    {msg.imageUrl ? (
+                                        <img src={msg.imageUrl} alt="Ảnh chat" className="w-full rounded-xl object-cover cursor-pointer hover:opacity-90 transition-opacity" />
+                                    ) : (
+                                        msg.text
+                                    )}
+                                </div>
+                                <span className="text-[10px] text-gray-400 mt-1 px-1">{msg.time}</span>
+                            </div>
+                        </div>
+                    ))
+                )}
+                <div ref={messagesEndRef} />
             </div>
 
-            {/* Chat Input */}
             <div className="p-3 bg-white border-t border-gray-100">
-                <div className="flex items-center gap-2 bg-gray-100 rounded-full px-3 py-2">
-                    <button className="text-gray-400 hover:text-primary transition-colors">
-                        <ImageIcon className="w-5 h-5" />
+                <div className="flex items-center gap-2 bg-gray-100 rounded-full px-3 py-2 relative z-50">
+                    <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        ref={fileInputRef}
+                        onChange={handleImageUpload}
+                    />
+                    <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isUploading}
+                        className="text-gray-400 hover:text-primary transition-colors flex items-center justify-center relative cursor-pointer"
+                    >
+                        {isUploading ? <Loader2 className="w-5 h-5 animate-spin text-primary" /> : <ImageIcon className="w-5 h-5" />}
                     </button>
                     <input
                         type="text"
                         placeholder="Nhập tin nhắn..."
                         className="flex-1 bg-transparent text-sm focus:outline-none"
-                        value={message}
-                        onChange={(e) => setMessage(e.target.value)}
-                        onKeyDown={(e) => {
-                            if (e.key === 'Enter' && message.trim() !== '') {
-                                // Xử lý gửi tin nhắn ở đây
-                                setMessage('');
-                            }
-                        }}
+                        value={messageInput}
+                        onChange={(e) => setMessageInput(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
                     />
-                    <button className="text-gray-400 hover:text-primary transition-colors">
-                        <Smile className="w-5 h-5" />
-                    </button>
                     <button
-                        className={`${message.trim() ? 'text-primary' : 'text-gray-400'} hover:text-primary-hover p-1 transition-colors`}
+                        type="button"
+                        onClick={handleSendMessage}
+                        disabled={!messageInput.trim()}
+                        className={`${messageInput.trim() ? 'text-primary cursor-pointer' : 'text-gray-400 cursor-not-allowed'} hover:text-primary-hover p-1 transition-colors`}
                     >
-                        <Send className="w-5 h-5" />
+                        <Send className="w-5 h-5 transform translate-y-[1px] -translate-x-[5px] -rotate-12" />
                     </button>
                 </div>
             </div>
-
         </div>
     );
 }

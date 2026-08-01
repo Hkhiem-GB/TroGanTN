@@ -4,6 +4,7 @@ import mongoose, { Schema, models } from 'mongoose';
 const notificationSchema = new Schema(
     {
         userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+        senderId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
         title: { type: String, required: true },
         content: { type: String, required: true },
         isRead: { type: Boolean, default: false },
@@ -12,7 +13,7 @@ const notificationSchema = new Schema(
             enum: ['SYSTEM', 'MESSAGE', 'PROMO', 'BOOKING'],
             default: 'SYSTEM'
         },
-        link: { type: String } // Đường dẫn để chuyển hướng khi bấm vào thông báo
+        link: { type: String }
     },
     { timestamps: true }
 );

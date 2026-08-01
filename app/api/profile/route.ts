@@ -5,6 +5,19 @@ import User from '@/models/User';
 import Booking from '@/models/Booking';
 import Room from '@/models/Room';
 
+// Định nghĩa kiểu dữ liệu cho Booking Populate để thay thế 'any'
+interface IPopulatedRoom {
+    title?: string;
+    address?: string;
+    themeImage?: string;
+}
+
+interface IBookingDocument {
+    _id: string;
+    roomId?: IPopulatedRoom;
+    bookingStatus: string;
+}
+
 // Lấy thông tin User và Lịch sử thuê trọ
 export async function GET(request: Request) {
     try {
@@ -19,7 +32,7 @@ export async function GET(request: Request) {
         const user = await User.findOne({ email }).lean();
         if (!user) return NextResponse.json({ success: false, error: 'Không tìm thấy user' }, { status: 404 });
 
-        // Khởi tạo model Room để Mongoose có thể populate (đề phòng lỗi schema chưa load)
+        // Khởi tạo model Room để Mongoose có thể populate
         await Room.init();
 
         // Tìm các lịch sử đặt phòng của user này
@@ -28,14 +41,17 @@ export async function GET(request: Request) {
             .sort({ createdAt: -1 })
             .lean();
 
-        // Map lại dữ liệu cho Frontend dễ đọc
-        const rentedRooms = bookings.map((b: any) => ({
-            id: b._id,
-            title: b.roomId?.title || 'Phòng trọ không xác định',
-            address: b.roomId?.address || 'Chưa cập nhật địa chỉ',
-            image: b.roomId?.themeImage || '/placeholder.jpg',
-            status: b.bookingStatus === 'ACTIVE' ? 'Đang thuê' : (b.bookingStatus === 'COMPLETED' ? 'Đã trả' : 'Đã hủy'),
-        }));
+        // Map lại dữ liệu cho Frontend dễ đọc (Đã xử lý kiểu dữ liệu an toàn)
+        const rentedRooms = bookings.map((b: unknown) => {
+            const booking = b as IBookingDocument;
+            return {
+                id: booking._id,
+                title: booking.roomId?.title || 'Phòng trọ không xác định',
+                address: booking.roomId?.address || 'Chưa cập nhật địa chỉ',
+                image: booking.roomId?.themeImage || '/placeholder.jpg',
+                status: booking.bookingStatus === 'ACTIVE' ? 'Đang thuê' : (booking.bookingStatus === 'COMPLETED' ? 'Đã trả' : 'Đã hủy'),
+            };
+        });
 
         return NextResponse.json({ success: true, data: { user, rentedRooms } });
     } catch (error) {
@@ -46,8 +62,9 @@ export async function GET(request: Request) {
 
 export async function PATCH(request: Request) {
     try {
+        // FIX: Đổi từ req.json() thành request.json() khớp với tham số đầu vào
         const body = await request.json();
-        const { email, phoneNumber, action, durationMonths } = body; // Thêm durationMonths
+        const { email, action, phoneNumber, durationMonths, bankId, bankAccountNumber, bankAccountName } = body;
 
         if (!email) return NextResponse.json({ success: false, error: 'Thiếu email' }, { status: 400 });
 
@@ -57,15 +74,27 @@ export async function PATCH(request: Request) {
         const user = await User.findOne({ email });
         if (!user) return NextResponse.json({ success: false, error: 'User không tồn tại' }, { status: 404 });
 
-        let updateData: any = {};
+        // Xử lý riêng cho hành động cập nhật ngân hàng (save trực tiếp)
+        if (action === 'update_bank') {
+            if (!user.landlordData) {
+                user.landlordData = {};
+            }
+            user.landlordData.bankId = bankId;
+            user.landlordData.bankAccountNumber = bankAccountNumber;
+            user.landlordData.bankAccountName = bankAccountName ? bankAccountName.toUpperCase() : '';
+
+            await user.save();
+            return NextResponse.json({ success: true, message: 'Cập nhật ngân hàng thành công' });
+        }
+
+        let updateData: Record<string, unknown> = {};
 
         if (action === 'update_phone') {
             updateData = { 'landlordData.phoneNumber': phoneNumber };
         }
         else if (action === 'upgrade_landlord') {
-            const monthsToAdd = durationMonths || 1; // Mặc định là 1 tháng nếu không có
+            const monthsToAdd = durationMonths || 1;
 
-            // Kiểm tra xem gói cũ còn hạn không. Nếu còn thì cộng dồn, nếu hết thì tính từ hôm nay
             const currentValidUntil = user.landlordData?.subscriptionValidUntil;
             const baseDate = (currentValidUntil && currentValidUntil > new Date())
                 ? new Date(currentValidUntil)
@@ -74,14 +103,14 @@ export async function PATCH(request: Request) {
             const newValidUntil = new Date(baseDate.setMonth(baseDate.getMonth() + monthsToAdd));
 
             updateData = {
-                role: 'LANDLORD',
+                role: user.role === 'ADMIN' ? 'ADMIN' : 'LANDLORD',
                 'landlordData.isSubscriptionActive': true,
                 'landlordData.subscriptionValidUntil': newValidUntil
             };
         }
         else if (action === 'cancel_landlord') {
             updateData = {
-                role: 'USER',
+                role: user.role === 'ADMIN' ? 'ADMIN' : 'USER',
                 'landlordData.isSubscriptionActive': false,
                 'landlordData.subscriptionValidUntil': null
             };

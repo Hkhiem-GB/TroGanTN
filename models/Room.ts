@@ -7,6 +7,7 @@ const roomSchema = new Schema(
         title: { type: String, required: true },
         themeImage: { type: String, required: true },
         galleryImages: [{ type: String }],
+        images: [{ type: String }],
 
         pricePerMonth: { type: Number, required: true },
         depositAmount: { type: Number, required: true },
@@ -24,11 +25,7 @@ const roomSchema = new Schema(
 
         rating: { type: Number, default: 0 },
         reviewCount: { type: Number, default: 0 },
-        status: {
-            type: String,
-            enum: ['AVAILABLE', 'BOOKED', 'MAINTENANCE'],
-            default: 'AVAILABLE'
-        }
+        status: { type: String, enum: ['Trống', 'Đã thuê', 'Đặt cọc'], default: 'Trống' },
     },
     { timestamps: true }
 );
