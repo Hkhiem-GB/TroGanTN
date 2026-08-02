@@ -4,6 +4,7 @@ import GoogleProvider from "next-auth/providers/google";
 import { connectToDatabase } from "@/lib/mongoose";
 import User from "@/models/User";
 import Notification from "@/models/Notification";
+import nodemailer from "nodemailer";
 
 declare module "next-auth" {
     interface Session {
@@ -21,6 +22,44 @@ declare module "next-auth/jwt" {
     }
 }
 
+// Cấu hình Transporter cho Nodemailer
+const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+    },
+});
+
+// Hàm hỗ trợ gửi email chào mừng
+async function sendWelcomeEmail(to: string, name: string) {
+    try {
+        await transporter.sendMail({
+            from: `"TroGanTN" <${process.env.EMAIL_USER}>`,
+            to,
+            subject: 'Chào mừng bạn đến với TroGanTN! 🎉',
+            html: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #333;">
+                    <h2 style="color: #ea580c;">Xin chào ${name}! 👋</h2>
+                    <p>Cảm ơn bạn đã đăng ký tài khoản và gia nhập cộng đồng <strong>TroGanTN</strong>.</p>
+                    <p>Chúng tôi hy vọng nền tảng này sẽ giúp bạn dễ dàng tìm kiếm được căn phòng trọ ưng ý hoặc kết nối được với những khách thuê tuyệt vời.</p>
+                    <div style="background-color: #f9fafb; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                        <p style="margin: 0; font-weight: bold;">💡 Bạn có biết?</p>
+                        <p style="margin: 10px 0 0 0;">Bạn có thể nâng cấp lên gói <strong>Chủ trọ</strong> để tự do đăng tải thông tin phòng trọ của mình tiếp cận đến hàng ngàn sinh viên!</p>
+                    </div>
+                    <p>Nếu gặp bất kỳ khó khăn nào trong quá trình sử dụng, đừng ngần ngại liên hệ với chúng tôi qua mục Hỗ trợ nhé.</p>
+                    <br/>
+                    <p>Chúc bạn một ngày tốt lành,</p>
+                    <p><strong>Ban quản trị TroGanTN</strong></p>
+                </div>
+            `,
+        });
+        console.log(`Đã gửi email chào mừng tới: ${to}`);
+    } catch (error) {
+        console.error("Lỗi khi gửi email chào mừng:", error);
+    }
+}
+
 export const authOptions: NextAuthOptions = {
     providers: [
         GoogleProvider({
@@ -33,10 +72,17 @@ export const authOptions: NextAuthOptions = {
             if (account?.provider === "google") {
                 try {
                     await connectToDatabase();
+                    // Lưu ý: Đảm bảo đã cập nhật isLocked vào model User
                     const existingUser = await User.findOne({ email: user.email });
 
-                    // Nếu CHƯA CÓ tài khoản => Lần đầu đăng nhập
-                    if (!existingUser) {
+                    if (existingUser) {
+                        // BỔ SUNG: Kiểm tra xem tài khoản có bị khóa không
+                        if (existingUser.isLocked) {
+                            console.log(`🔒 Chặn đăng nhập: Tài khoản ${user.email} đang bị khóa.`);
+                            return '/?error=AccountLocked';
+                        }
+                    } else {
+                        // Nếu CHƯA CÓ tài khoản => Lần đầu đăng nhập
                         const newUser = await User.create({
                             name: user.name,
                             email: user.email,
@@ -52,6 +98,12 @@ export const authOptions: NextAuthOptions = {
                             type: 'SYSTEM',
                             link: '/' // Chuyển về trang chủ khi click
                         });
+
+                        // TỰ ĐỘNG GỬI EMAIL CHÀO MỪNG
+                        if (newUser.email && newUser.name) {
+                            // Không dùng await ở đây để không làm chậm quá trình đăng nhập của user
+                            sendWelcomeEmail(newUser.email, newUser.name).catch(console.error);
+                        }
                     }
                     return true;
                 } catch (error) {
@@ -82,7 +134,7 @@ export const authOptions: NextAuthOptions = {
             if (session.user) {
                 session.user.role = token.role;
                 // 3. ĐẨY ID TỪ TOKEN RA SESSION ĐỂ FRONTEND SỬ DỤNG ĐƯỢC
-                session.user.id = token.id;
+                session.user.id = token.id as string;
             }
             return session;
         }

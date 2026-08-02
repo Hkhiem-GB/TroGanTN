@@ -3,7 +3,7 @@
 import {useState, useEffect, useRef} from 'react';
 import { useSession, signIn } from 'next-auth/react';
 import Image from 'next/image';
-import { User, History, Crown, Phone, ShieldCheck, Check, ArrowLeft, Lock, AlertTriangle, CalendarDays, ShieldAlert } from 'lucide-react';
+import { User, History, Crown, Phone, ShieldCheck, Check, ArrowLeft, Lock, AlertTriangle, CalendarDays, ShieldAlert, CheckCircle } from 'lucide-react';
 import { Toaster } from 'react-hot-toast';
 import Link from "next/link";
 import { notify } from '@/utils/toast';
@@ -61,6 +61,9 @@ export default function ProfilePage() {
     const [bankAccountName, setBankAccountName] = useState('');
     const [isOpenBankDropdown, setIsOpenBankDropdown] = useState(false);
 
+    // State quản lý hiệu ứng khi thanh toán xong
+    const [isPaymentSuccess, setIsPaymentSuccess] = useState(false);
+
     const bankDropdownRef = useRef<HTMLDivElement>(null);
 
     // ==========================================
@@ -71,7 +74,7 @@ export default function ProfilePage() {
     const isLandlord = userData?.role === 'LANDLORD' || isSubscriptionActive;
 
     // ==========================================
-    // 3. EFFECTS (Gọi API khi tải trang)
+    // 3. EFFECTS (Gọi API khi tải trang & Lắng nghe thanh toán)
     // ==========================================
     useEffect(() => {
         if (status === 'loading') return;
@@ -84,7 +87,6 @@ export default function ProfilePage() {
                         setUserData(json.data.user);
                         setPhoneNumber(json.data.user.landlordData?.phoneNumber || '');
 
-                        // FIX: Lấy dữ liệu ngân hàng phải nằm gọn bên trong khối .then() này
                         setBankId(json.data.user.landlordData?.bankId || 'MB');
                         setBankAccountNumber(json.data.user.landlordData?.bankAccountNumber || '');
                         setBankAccountName(json.data.user.landlordData?.bankAccountName || '');
@@ -112,10 +114,52 @@ export default function ProfilePage() {
 
     }, [session, status]);
 
+    // LẮNG NGHE KẾT QUẢ THANH TOÁN (SEPAY WEBHOOK)
+    useEffect(() => {
+        let interval: NodeJS.Timeout;
+
+        // Chỉ bắt đầu kiểm tra khi đang mở QR và chưa báo thành công
+        if (showQR && session?.user?.email && !isPaymentSuccess) {
+            interval = setInterval(async () => {
+                try {
+                    const res = await fetch(`/api/profile?email=${session.user.email}`);
+                    const data = await res.json();
+
+                    // Nếu DB đã được SePay cập nhật thành công
+                    if (data.success && (data.data.user.role === 'LANDLORD' || data.data.user.landlordData?.isSubscriptionActive)) {
+                        clearInterval(interval);
+
+                        // 1. Đổi Animation Modal sang Success
+                        setIsPaymentSuccess(true);
+
+                        // 2. Bắn thông báo Toast
+                        notify.success('Đăng ký gói Chủ trọ thành công!');
+
+                        // 3. Chờ 2 giây để user nhìn hiệu ứng, sau đó đóng Modal và update giao diện
+                        setTimeout(async () => {
+                            setShowQR(false); // Đóng modal
+
+                            // Cập nhật session cho NextAuth để Header tự đổi avatar/role lập tức (không cần F5)
+                            await update({ role: data.data.user.role });
+
+                            // Cập nhật state nội bộ để ProfilePage đổi giao diện
+                            setUserData(data.data.user);
+                            setIsPaymentSuccess(false); // Reset cờ cho lần sau
+                        }, 2000);
+                    }
+                } catch (error) {
+                    console.error("Lỗi khi check trạng thái thanh toán:", error);
+                }
+            }, 3000); // Mỗi 3 giây hỏi Backend 1 lần
+        }
+
+        return () => clearInterval(interval);
+    }, [showQR, session, isPaymentSuccess, update]);
+
+
     // ==========================================
     // 4. HÀM TIỆN ÍCH (Helpers)
     // ==========================================
-    // Kiểm tra chuẩn 10 số
     const isValidPhoneNumber = (phone: string) => {
         const phoneRegex = /^0[0-9]{9}$/;
         return phoneRegex.test(phone);
@@ -125,7 +169,6 @@ export default function ProfilePage() {
     // 5. HÀM XỬ LÝ SỰ KIỆN (Event Handlers)
     // ==========================================
 
-    // --- Nhóm xử lý cập nhật thông tin ---
     const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const value = e.target.value;
         const onlyNums = value.replace(/[^0-9]/g, '');
@@ -160,7 +203,6 @@ export default function ProfilePage() {
         }
     };
 
-    // --- Nhóm xử lý Nâng cấp/Hủy gói Chủ trọ ---
     const handleOpenQR = () => {
         if (!agreePolicy || !confirmAge) {
             notify.error('Vui lòng xác nhận đủ các điều khoản!');
@@ -168,27 +210,6 @@ export default function ProfilePage() {
         }
         setShowModal(false);
         setShowQR(true);
-    };
-
-    const handlePaymentSuccess = async () => {
-        const toastId = notify.loading('Đang xác nhận thanh toán...');
-        try {
-            const res = await fetch('/api/profile', {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email: session?.user?.email, action: 'upgrade_landlord', durationMonths: selectedPlan.months })
-            });
-            const data = await res.json();
-
-            if (data.success) {
-                setUserData(data.data);
-                await update({ role: isAdmin ? 'ADMIN' : 'LANDLORD' });
-                notify.success(`Chúc mừng! Bạn đã đăng ký gói ${selectedPlan.label} thành công.`, toastId);
-                setShowQR(false);
-            }
-        } catch (error) {
-            notify.error('Lỗi kết nối mạng', toastId);
-        }
     };
 
     const handleCancelSubscription = async () => {
@@ -213,7 +234,6 @@ export default function ProfilePage() {
         }
     };
 
-    // --- Xử lý cập nhật ngân hàng ---
     const handleUpdateBank = async () => {
         if (!bankAccountNumber || !bankAccountName) {
             return notify.error('Vui lòng nhập đầy đủ Số tài khoản và Tên chủ tài khoản');
@@ -247,8 +267,6 @@ export default function ProfilePage() {
     // ==========================================
     // 6. BIẾN TÍNH TOÁN HIỂN THỊ (Render Variables)
     // ==========================================
-
-    // --- Tính toán thời gian gói ---
     const validUntilDate = userData?.landlordData?.subscriptionValidUntil
         ? new Date(userData.landlordData.subscriptionValidUntil)
         : new Date();
@@ -263,10 +281,9 @@ export default function ProfilePage() {
     const remainingHours = Math.max(0, Math.ceil(72 - diffHours));
     const canCancel = diffHours >= 72 || isAdmin;
 
-    // --- Thông tin ngân hàng & QR ---
     const BANK_ID = process.env.NEXT_PUBLIC_BANK_ID || 'MB';
-    const BANK_ACCOUNT = process.env.NEXT_PUBLIC_BANK_ACCOUNT || '000000000';
-    const BANK_ACCOUNT_NAME = process.env.NEXT_PUBLIC_BANK_ACCOUNT_NAME || 'CHUA CAI DAT';
+    const BANK_ACCOUNT ='VQRQAKWYQ7698';
+    const BANK_ACCOUNT_NAME = process.env.NEXT_PUBLIC_BANK_ACCOUNT_NAME || '';
 
     const transferContent = `UPGRADE ${session?.user?.email?.split('@')[0].toUpperCase()} ${selectedPlan.months}M`;
     const vietQrUrl = `https://img.vietqr.io/image/${BANK_ID.trim()}-${BANK_ACCOUNT.trim()}-compact.png?amount=${selectedPlan.price}&addInfo=${encodeURIComponent(transferContent)}&accountName=${encodeURIComponent(BANK_ACCOUNT_NAME.trim())}`;
@@ -349,9 +366,7 @@ export default function ProfilePage() {
                             <div className="animate-in fade-in duration-300">
                                 <h2 className="text-xl font-bold mb-6">Thông tin cá nhân</h2>
 
-                                {/* BỐ CỤC 2 CỘT CÂN ĐỐI, TẬN DỤNG HẾT KHÔNG GIAN */}
                                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
-
                                     {/* CỘT TRÁI (5 phần): THÔNG TIN CƠ BẢN */}
                                     <div className="lg:col-span-5 space-y-6">
                                         <div className="flex items-center gap-6">
@@ -428,12 +443,12 @@ export default function ProfilePage() {
                                         </button>
                                     </div>
 
-                                    {/* CỘT PHẢI (7 phần): CẤU HÌNH NGÂN HÀNG (Dành cho Chủ trọ/Admin) */}
+                                    {/* CỘT PHẢI (7 phần): CẤU HÌNH NGÂN HÀNG */}
                                     {(isLandlord || isAdmin) && (
                                         <div className="lg:col-span-7 bg-gray-50/60 p-6 rounded-2xl border border-gray-100 flex flex-col justify-between">
                                             <div>
                                                 <h3 className="text-base font-bold text-gray-900 mb-1">Cấu hình Ngân hàng nhận Tiền Cọc</h3>
-                                                <p className="text-xs text-gray-500 mb-6">Thông tin này dùng để tạo mã QR tự động giúp người thuê chuyển khoản cọc trực tiếp cho bạn.</p>
+                                                <p className="text-xs text-gray-500 mb-6">Thông vị này dùng để tạo mã QR tự động giúp người thuê chuyển khoản cọc trực tiếp cho bạn.</p>
 
                                                 <div className="space-y-4">
                                                     <div className="relative" ref={bankDropdownRef}>
@@ -449,7 +464,6 @@ export default function ProfilePage() {
                                                             </svg>
                                                         </div>
 
-                                                        {/* Menu danh sách xổ xuống (Có thanh cuộn mượt mà khi dài) */}
                                                         {isOpenBankDropdown && (
                                                             <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-100 shadow-2xl rounded-xl z-50 max-h-60 overflow-y-auto py-1 animate-in fade-in slide-in-from-top-2 duration-150">
                                                                 {BANKS_LIST.map((bank) => (
@@ -513,12 +527,12 @@ export default function ProfilePage() {
                                             </div>
                                         </div>
                                     )}
-
                                 </div>
                             </div>
                         )}
 
-                        {activeTab === 'history' && !isLandlord && (
+
+                        {activeTab === 'history' && (!isLandlord || isAdmin) && (
                             <div className="animate-in fade-in duration-300">
                                 <h2 className="text-xl font-bold mb-6">Trọ đã và đang thuê</h2>
                                 {rentedRooms.length === 0 ? (
@@ -670,8 +684,25 @@ export default function ProfilePage() {
 
                         <div className="space-y-4 mb-8">
                             <label className="flex items-start gap-3 cursor-pointer group">
-                                <input type="checkbox" checked={agreePolicy} onChange={(e) => setAgreePolicy(e.target.checked)} className="mt-1 w-5 h-5 rounded border-gray-300 text-primary focus:ring-primary" />
-                                <span className="text-sm text-gray-600 group-hover:text-gray-900 transition-colors">Tôi đã đọc và đồng ý với các Chính sách dành cho Chủ trọ của nền tảng.</span>
+                                <input
+                                    type="checkbox"
+                                    checked={agreePolicy}
+                                    onChange={(e) => setAgreePolicy(e.target.checked)}
+                                    className="mt-1 w-5 h-5 rounded border-gray-300 text-primary focus:ring-primary shrink-0"
+                                />
+                                <span className="text-sm text-gray-600 group-hover:text-gray-900 transition-colors">
+                                    Tôi đã đọc và đồng ý với các{' '}
+                                    <Link
+                                        href="/policies"
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="text-primary font-medium hover:underline"
+                                    >
+                                    Chính sách
+                                    </Link>{' '}
+                                    dành cho Chủ trọ của nền tảng.
+                                </span>
                             </label>
                             <label className="flex items-start gap-3 cursor-pointer group">
                                 <input type="checkbox" checked={confirmAge} onChange={(e) => setConfirmAge(e.target.checked)} className="mt-1 w-5 h-5 rounded border-gray-300 text-primary focus:ring-primary" />
@@ -698,14 +729,15 @@ export default function ProfilePage() {
                 </div>
             )}
 
-            {/* MODAL MÃ QR THANH TOÁN */}
+            {/* MODAL MÃ QR THANH TOÁN (CẬP NHẬT ANIMATION) */}
             {showQR && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
                      onClick={(e) => {
-                         if (e.target === e.currentTarget) setShowQR(false);
+                         // Chặn click ra ngoài nếu đang trong hiệu ứng thanh toán thành công
+                         if (e.target === e.currentTarget && !isPaymentSuccess) setShowQR(false);
                      }}
                 >
-                    <div className="bg-white rounded-3xl w-full max-w-3xl p-8 md:p-10 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
+                    <div className="bg-white rounded-3xl w-full max-w-4xl p-8 md:p-10 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200">
 
                         <div className="text-center mb-8">
                             <ShieldCheck className="w-16 h-16 text-green-500 mx-auto mb-3" />
@@ -716,17 +748,18 @@ export default function ProfilePage() {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-10 items-center">
                             {/* CỘT TRÁI: QR CODE */}
                             <div className="flex flex-col items-center justify-center">
-                                <div className="w-64 h-64 bg-gray-50 rounded-2xl p-2 border-2 border-primary/20 shadow-sm relative overflow-hidden mb-3">
+                                <div className="w-64 h-64 bg-gray-50 rounded-2xl p-2 border-2 border-primary/20 shadow-sm relative overflow-hidden mb-3 group">
+                                    <div className="absolute inset-0 border-4 border-primary/30 rounded-2xl animate-pulse"></div>
                                     <img
                                         src={vietQrUrl}
                                         alt="Mã QR Thanh toán"
-                                        className="w-full h-full object-contain"
+                                        className="w-full h-full object-contain relative z-10 rounded-xl"
                                     />
                                 </div>
                                 <span className="text-xs text-gray-400 font-medium">Hỗ trợ quét mọi ứng dụng ngân hàng</span>
                             </div>
 
-                            {/* CỘT PHẢI: THÔNG TIN VÀ NÚT BẤM */}
+                            {/* CỘT PHẢI: THÔNG TIN VÀ ANIMATION */}
                             <div className="flex flex-col justify-center space-y-6">
                                 <div className="bg-gray-50 rounded-xl p-5 text-left text-sm space-y-4 border border-gray-100">
                                     <div className="flex justify-between items-center border-b border-gray-200 pb-3">
@@ -739,15 +772,45 @@ export default function ProfilePage() {
                                         <div className="font-mono font-bold text-gray-900 bg-gray-200 px-3 py-2.5 rounded-lg text-center break-all text-base shadow-inner border border-gray-300">
                                             {transferContent}
                                         </div>
+                                        <span className="text-xs text-red-500 font-medium text-center italic mt-1 animate-pulse">
+                                            * Nội dung chuyển khoản không được thay đổi
+                                        </span>
                                     </div>
                                 </div>
 
                                 <div className="flex flex-col gap-3">
-                                    <button onClick={handlePaymentSuccess} className="w-full py-3.5 bg-green-500 text-white font-bold rounded-xl hover:bg-green-600 transition-colors shadow-sm text-base">
-                                        Đã thanh toán (Dev Test)
-                                    </button>
-                                    <button onClick={() => setShowQR(false)} className="w-full py-3.5 text-gray-600 font-medium bg-white border border-gray-200 rounded-xl hover:bg-gray-50 hover:text-gray-900 transition-colors text-base">
-                                        Hủy giao dịch
+                                    {/* KHU VỰC ANIMATION KHI CHỜ VÀ KHI THÀNH CÔNG */}
+                                    <div className={`w-full relative overflow-hidden rounded-xl border p-4 flex items-center justify-center gap-3 transition-colors duration-500 ${isPaymentSuccess ? 'bg-green-50 border-green-200' : 'bg-blue-50 border-blue-100'}`}>
+                                        {isPaymentSuccess ? (
+                                            <>
+                                                <CheckCircle className="w-6 h-6 text-green-500 animate-in zoom-in duration-300" />
+                                                <span className="text-green-700 font-bold text-base animate-in fade-in duration-300">
+                                                    Thanh toán thành công!
+                                                </span>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <div className="relative flex h-4 w-4 shrink-0">
+                                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                                                    <span className="relative inline-flex rounded-full h-4 w-4 bg-blue-500"></span>
+                                                </div>
+                                                <span className="text-blue-700 font-bold text-base animate-pulse">
+                                                    Hệ thống đang xử lý...
+                                                </span>
+                                            </>
+                                        )}
+                                    </div>
+
+                                    <button
+                                        onClick={() => setShowQR(false)}
+                                        disabled={isPaymentSuccess}
+                                        className={`w-full py-3.5 font-medium rounded-xl transition-colors text-base border ${
+                                            isPaymentSuccess
+                                                ? 'bg-gray-100 text-gray-400 border-gray-100 cursor-not-allowed'
+                                                : 'text-gray-500 bg-white border-gray-200 hover:bg-gray-50 hover:text-gray-900'
+                                        }`}
+                                    >
+                                        Đóng (Hủy giao dịch)
                                     </button>
                                 </div>
                             </div>

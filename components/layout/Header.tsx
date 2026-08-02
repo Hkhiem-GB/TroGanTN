@@ -2,18 +2,24 @@
 
 import Link from 'next/link';
 import Image from 'next/image';
-import { LogOut, HelpCircle, User, Crown, ShieldAlert, Flag } from 'lucide-react';
+import {LogOut, HelpCircle, User, Crown, ShieldAlert, Flag, Shield} from 'lucide-react';
 import { useEffect, useRef, useState } from "react";
 import { signIn, signOut, useSession } from "next-auth/react";
-import NotificationBell from './NotificationBell'; // <-- Component chuông chúng ta vừa tạo
+import { useSearchParams, useRouter } from 'next/navigation';
+import toast from 'react-hot-toast';
+import NotificationBell from './NotificationBell';
 
 export default function Header() {
     const { data: session, status } = useSession();
 
-    // Header giờ chỉ còn quản lý mỗi User Menu
+    // Khởi tạo router và searchParams để bắt lỗi từ URL
+    const searchParams = useSearchParams();
+    const router = useRouter();
+
     const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
     const dropdownRef = useRef<HTMLDivElement>(null);
 
+    // Xử lý đóng menu khi click ra ngoài
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
             if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -23,6 +29,20 @@ export default function Header() {
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
+
+    // Xử lý hiển thị thông báo lỗi nếu có param "error" trên URL
+    useEffect(() => {
+        const error = searchParams?.get('error');
+
+        if (error === 'AccountLocked') {
+            toast.error('Đăng nhập thất bại: Tài khoản của bạn đã bị quản trị viên khóa do vi phạm chính sách.');
+            // Xóa chữ ?error=AccountLocked trên thanh địa chỉ để url gọn gàng
+            router.replace('/', { scroll: false });
+        } else if (error === 'Default') {
+            toast.error('Có lỗi xảy ra trong quá trình đăng nhập. Vui lòng thử lại!');
+            router.replace('/', { scroll: false });
+        }
+    }, [searchParams, router]);
 
     const userRole = (session?.user as { role?: string })?.role;
     const isAdmin = userRole === 'ADMIN';
@@ -40,7 +60,6 @@ export default function Header() {
 
                 <div className="flex items-center gap-4">
 
-                    {/* Component Chuông thông báo siêu gọn gàng */}
                     <NotificationBell />
 
                     <button className="hidden md:block px-4 py-2 text-primary text-sm font-medium border border-primary rounded-full hover:bg-primary-light transition-colors">
@@ -97,6 +116,9 @@ export default function Header() {
                                     </Link>
                                     <Link href="/support" onClick={() => setIsUserMenuOpen(false)} className="flex items-center gap-3 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-primary/5 hover:text-primary transition-colors">
                                         <HelpCircle className="w-4 h-4" /> Hỗ trợ
+                                    </Link>
+                                    <Link href="/policies" onClick={() => setIsUserMenuOpen(false)} className="flex items-center gap-3 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-primary/5 hover:text-primary transition-colors">
+                                        <Shield className="w-4 h-4" /> Chính sách
                                     </Link>
                                     <Link href="/report" onClick={() => setIsUserMenuOpen(false)} className="flex items-center gap-3 px-4 py-3 text-sm font-medium text-gray-700 hover:bg-primary/5 hover:text-primary transition-colors">
                                         <Flag className="w-4 h-4" /> Báo cáo

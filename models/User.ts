@@ -20,7 +20,11 @@ const userSchema = new Schema(
             bankId: { type: String }, // Mã ngân hàng (VD: MB, VCB, TCB...)
             bankAccountNumber: { type: String }, // Số tài khoản
             bankAccountName: { type: String }, // Tên chủ tài khoản
-        }
+        },
+        isLocked: {
+            type: Boolean,
+            default: false
+        },
     },
     { timestamps: true }
 );

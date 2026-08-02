@@ -6,7 +6,7 @@ import {
     Users, Crown, ShieldAlert, AlertTriangle, Search,
     MoreVertical, Trash2, XCircle, Info, ChevronLeft,
     ChevronRight, LayoutDashboard, MessageSquare, Filter,
-    ArrowDownAZ, ArrowUpZA, Clock, ChevronDown, User, Send, Check, X, ZoomIn
+    ArrowDownAZ, ArrowUpZA, Clock, ChevronDown, User, Send, Check, X, ZoomIn, Lock, ShieldBan, Unlock
 } from 'lucide-react';
 import { notify } from '@/utils/toast';
 
@@ -20,6 +20,7 @@ export interface AdminUser {
     planStatus: string;
     registerDate: string;
     expireDate: string | null;
+    isLocked?: boolean; // Bổ sung trường isLocked
 }
 
 export interface ReportItem {
@@ -58,8 +59,14 @@ export default function AdminDashboardPage() {
     const [openActionId, setOpenActionId] = useState<string | null>(null);
     const [openFilter, setOpenFilter] = useState<string | null>(null);
 
-    // Thêm State quản lý Custom Modal cho User (Kick/Remove)
-    const [userActionConfirm, setUserActionConfirm] = useState<{ userId: string, action: 'kick' | 'remove_plan' } | null>(null);
+    // Modal Action cơ bản (Kick/Remove/Unlock)
+    const [userActionConfirm, setUserActionConfirm] = useState<{ userId: string, action: 'kick' | 'remove_plan' | 'unlock' } | null>(null);
+
+    // STATES CHO MODAL KHÓA TÀI KHOẢN
+    const [userToLock, setUserToLock] = useState<AdminUser | null>(null);
+    const [isLockPermanent, setIsLockPermanent] = useState(false);
+    const [lockDays, setLockDays] = useState<number>(7);
+    const [isLocking, setIsLocking] = useState(false);
 
     const actionMenuRef = useRef<HTMLTableSectionElement>(null);
     const toolbarRef = useRef<HTMLDivElement>(null);
@@ -114,7 +121,7 @@ export default function AdminDashboardPage() {
         }
     }, [debouncedSearch, sortOrder, roleFilter, statusFilter, page, itemsPerPage, session]);
 
-    // Hàm thực thi hành động User (Sau khi confirm qua Modal)
+    // Hàm thực thi Kick / Xóa gói / Mở khóa
     const confirmAdminAction = async () => {
         if (!userActionConfirm) return;
         const { userId, action } = userActionConfirm;
@@ -138,6 +145,45 @@ export default function AdminDashboardPage() {
             }
         } catch (error) {
             notify.error('Lỗi kết nối mạng', toastId);
+        }
+    };
+
+    // Hàm thực thi Khóa tài khoản
+    const handleLockAccount = async () => {
+        if (!userToLock) return;
+        if (!isLockPermanent && (lockDays <= 0 || !lockDays)) {
+            notify.error('Số ngày khóa phải lớn hơn 0');
+            return;
+        }
+
+        setIsLocking(true);
+        const toastId = notify.loading('Đang xử lý khóa tài khoản...');
+        try {
+            const res = await fetch('/api/admin/users', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    userId: userToLock.id,
+                    action: 'lock',
+                    duration: isLockPermanent ? 'PERMANENT' : lockDays
+                })
+            });
+            const data = await res.json();
+
+            if (data.success) {
+                notify.success(`Đã khóa tài khoản ${userToLock.name}`, toastId);
+                setUserToLock(null);
+                // Reset lại state sau khi khóa thành công
+                setIsLockPermanent(false);
+                setLockDays(7);
+                fetchUsers();
+            } else {
+                notify.error(data.message || 'Lỗi khi khóa tài khoản', toastId);
+            }
+        } catch (error) {
+            notify.error('Lỗi kết nối mạng', toastId);
+        } finally {
+            setIsLocking(false);
         }
     };
 
@@ -400,7 +446,13 @@ export default function AdminDashboardPage() {
                                                             {user.role === 'ADMIN' && <div className="absolute -bottom-1 -right-1 bg-red-500 rounded-full p-0.5"><ShieldAlert className="w-2.5 h-2.5 text-white"/></div>}
                                                             {user.role === 'LANDLORD' && <div className="absolute -bottom-1 -right-1 bg-yellow-400 rounded-full p-0.5"><Crown className="w-2.5 h-2.5 text-white"/></div>}
                                                         </div>
-                                                        <div><div className={`font-bold ${user.role === 'ADMIN' ? 'text-red-700' : 'text-gray-900'}`}>{user.name}</div><div className="text-xs text-gray-500">{user.email}</div></div>
+                                                        <div>
+                                                            <div className={`font-bold ${user.role === 'ADMIN' ? 'text-red-700' : 'text-gray-900'} flex items-center gap-2`}>
+                                                                {user.name}
+                                                                {user.isLocked && <span className="px-1.5 py-0.5 bg-red-100 text-red-600 rounded text-[10px] font-bold">BỊ KHÓA</span>}
+                                                            </div>
+                                                            <div className="text-xs text-gray-500">{user.email}</div>
+                                                        </div>
                                                     </div>
                                                 </td>
                                                 <td className="px-5 py-4 text-gray-600 font-medium">{user.phone || 'Chưa cập nhật'}</td>
@@ -416,9 +468,22 @@ export default function AdminDashboardPage() {
                                                                 <button onClick={() => setOpenActionId(openActionId === user.id ? null : user.id)} className={`p-1.5 rounded-lg transition-colors ${openActionId === user.id ? 'bg-gray-200 text-gray-800' : 'text-gray-400 hover:bg-gray-100'}`}><MoreVertical className="w-5 h-5" /></button>
                                                                 {openActionId === user.id && (
                                                                     <div className="absolute right-0 mt-1 w-48 bg-white border border-gray-100 shadow-xl rounded-xl z-50 py-1 animate-in fade-in zoom-in-95 duration-100">
-                                                                        <button onClick={() => setUserActionConfirm({ userId: user.id, action: 'kick' })} className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 font-medium"><Trash2 className="w-4 h-4"/> Kick tài khoản</button>
+
+                                                                        {/* KIỂM TRA TRẠNG THÁI KHÓA ĐỂ HIỆN NÚT TƯƠNG ỨNG */}
+                                                                        {user.isLocked ? (
+                                                                            <button onClick={() => { setUserActionConfirm({ userId: user.id, action: 'unlock' }); setOpenActionId(null); }} className="w-full text-left px-4 py-2.5 text-sm text-green-600 hover:bg-green-50 flex items-center gap-2 font-medium">
+                                                                                <Unlock className="w-4 h-4"/> Mở khóa tài khoản
+                                                                            </button>
+                                                                        ) : (
+                                                                            <button onClick={() => { setUserToLock(user); setOpenActionId(null); }} className="w-full text-left px-4 py-2.5 text-sm text-orange-600 hover:bg-orange-50 flex items-center gap-2 font-medium">
+                                                                                <Lock className="w-4 h-4"/> Khóa tài khoản
+                                                                            </button>
+                                                                        )}
+
+                                                                        <button onClick={() => { setUserActionConfirm({ userId: user.id, action: 'kick' }); setOpenActionId(null); }} className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 font-medium"><Trash2 className="w-4 h-4"/> Kick tài khoản</button>
+
                                                                         {user.role === 'LANDLORD' && (
-                                                                            <button onClick={() => setUserActionConfirm({ userId: user.id, action: 'remove_plan' })} className="w-full text-left px-4 py-2.5 text-sm text-orange-600 hover:bg-orange-50 flex items-center gap-2 font-medium"><XCircle className="w-4 h-4"/> Xóa gói Chủ trọ</button>
+                                                                            <button onClick={() => { setUserActionConfirm({ userId: user.id, action: 'remove_plan' }); setOpenActionId(null); }} className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 font-medium"><XCircle className="w-4 h-4"/> Xóa gói Chủ trọ</button>
                                                                         )}
                                                                     </div>
                                                                 )}
@@ -497,7 +562,10 @@ export default function AdminDashboardPage() {
                             <div className={`mx-auto w-20 h-20 rounded-full bg-gray-100 flex items-center justify-center mb-3 relative ${selectedUser.role === 'ADMIN' ? 'ring-4 ring-red-500 p-1' : selectedUser.role === 'LANDLORD' ? 'ring-4 ring-yellow-400 p-1' : ''}`}>
                                 {selectedUser.avatar ? <img src={selectedUser.avatar} alt="avt" className="w-full h-full rounded-full object-cover"/> : <User className="w-10 h-10 text-gray-400" />}
                             </div>
-                            <h3 className="text-xl font-bold text-gray-900">{selectedUser.name}</h3>
+                            <h3 className="text-xl font-bold text-gray-900 flex items-center justify-center gap-2">
+                                {selectedUser.name}
+                                {selectedUser.isLocked && <span className="px-2 py-0.5 bg-red-100 text-red-600 rounded text-xs font-bold">BỊ KHÓA</span>}
+                            </h3>
                             <p className="text-gray-500 text-sm mt-1">{selectedUser.email}</p>
                             <div className="mt-2">{renderRoleBadge(selectedUser.role)}</div>
                         </div>
@@ -512,11 +580,92 @@ export default function AdminDashboardPage() {
                 </div>
             )}
 
+            {/* MODAL CẤU HÌNH KHÓA TÀI KHOẢN (Hiển thị form số ngày) */}
+            {userToLock && (
+                <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200" onClick={(e) => { if (e.target === e.currentTarget) setUserToLock(null); }}>
+                    <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl relative overflow-hidden animate-in zoom-in-95 duration-200">
+                        {/* Header */}
+                        <div className="bg-red-50 p-6 flex items-start justify-between border-b border-red-100">
+                            <div className="flex items-center gap-4">
+                                <div className="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center shrink-0">
+                                    <ShieldBan className="w-6 h-6" />
+                                </div>
+                                <div>
+                                    <h3 className="text-xl font-bold text-red-700">Khóa tài khoản</h3>
+                                    <p className="text-sm text-red-500/80 mt-1 font-medium line-clamp-1">{userToLock.email}</p>
+                                </div>
+                            </div>
+                            <button onClick={() => setUserToLock(null)} className="p-2 bg-white/50 hover:bg-white text-red-400 hover:text-red-600 rounded-full transition-colors">
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        {/* Body */}
+                        <div className="p-6 space-y-6">
+                            <div className="bg-orange-50 border border-orange-100 p-4 rounded-2xl flex gap-3 text-orange-800 text-sm">
+                                <AlertTriangle className="w-5 h-5 shrink-0 text-orange-500" />
+                                <p>Tài khoản bị khóa sẽ không thể đăng nhập và mọi bài đăng (nếu có) sẽ bị ẩn khỏi hệ thống.</p>
+                            </div>
+
+                            {/* Toggle Khóa vĩnh viễn */}
+                            <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl border border-gray-100 hover:border-gray-200 transition-colors">
+                                <div>
+                                    <div className="font-bold text-gray-900">Khóa vĩnh viễn</div>
+                                    <div className="text-sm text-gray-500 mt-0.5">Vô hiệu hóa tài khoản này mãi mãi</div>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setIsLockPermanent(!isLockPermanent)}
+                                    className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${isLockPermanent ? 'bg-red-500' : 'bg-gray-300'}`}
+                                >
+                                    <span className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${isLockPermanent ? 'translate-x-5' : 'translate-x-0'}`} />
+                                </button>
+                            </div>
+
+                            {/* Input Số ngày khóa */}
+                            <div className={`transition-opacity duration-200 ${isLockPermanent ? 'opacity-40 pointer-events-none' : 'opacity-100'}`}>
+                                <label className="block text-sm font-bold text-gray-700 mb-2">
+                                    Số ngày khóa (Ngày)
+                                </label>
+                                <div className="relative">
+                                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        value={lockDays}
+                                        onChange={(e) => setLockDays(parseInt(e.target.value) || 0)}
+                                        disabled={isLockPermanent}
+                                        className="w-full pl-11 pr-4 py-3.5 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-red-500/20 focus:border-red-500 outline-none transition-all font-medium text-gray-900 disabled:bg-gray-100"
+                                        placeholder="Nhập số ngày..."
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Footer */}
+                        <div className="p-6 pt-2 bg-gray-50 flex gap-3">
+                            <button
+                                onClick={() => setUserToLock(null)}
+                                className="flex-1 py-3.5 bg-white border border-gray-200 text-gray-700 font-bold rounded-xl hover:bg-gray-50 transition-colors"
+                            >
+                                Hủy bỏ
+                            </button>
+                            <button
+                                onClick={handleLockAccount}
+                                disabled={isLocking}
+                                className="flex-1 py-3.5 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-sm shadow-red-200 transition-colors flex items-center justify-center gap-2 disabled:opacity-70"
+                            >
+                                {isLocking ? 'Đang xử lý...' : (isLockPermanent ? 'Khóa vĩnh viễn' : 'Xác nhận khóa')}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* MODAL CHI TIẾT BÁO CÁO */}
             {selectedReport && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={(e) => { if (e.target === e.currentTarget) setSelectedReport(null); }}>
                     <div className="bg-white rounded-3xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95">
-
                         <div className="p-6 border-b border-gray-100 flex justify-between items-start bg-gray-50/50 rounded-t-3xl">
                             <div>
                                 <h3 className="text-xl font-bold text-gray-900 mb-1">{selectedReport.subject}</h3>
@@ -527,13 +676,14 @@ export default function AdminDashboardPage() {
                                     <span>{formatTimeGmail(selectedReport.createdAt)}</span>
                                 </div>
                             </div>
-                            <button onClick={() => setSelectedReport(null)} className="p-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100 transition-colors"><X className="w-5 h-5" /></button>
+                            <button onClick={() => setSelectedReport(null)} className="p-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100 transition-colors">
+                                <X className="w-5 h-5" />
+                            </button>
                         </div>
 
-                        {/* FIX ĐÂY NÀY: Gom chung nội dung và lịch sử phản hồi vào vùng cuộn được */}
+                        {/*Gom chung nội dung và lịch sử phản hồi vào vùng cuộn được */}
                         <div className="p-6 overflow-y-auto flex-1 text-gray-700 leading-relaxed text-sm">
                             <div className="whitespace-pre-wrap">{selectedReport.content}</div>
-
                             {selectedReport.images && selectedReport.images.length > 0 && (
                                 <div className="mt-6 border-t border-gray-100 pt-6">
                                     <p className="text-sm font-bold text-gray-900 mb-4">Hình ảnh đính kèm ({selectedReport.images.length})</p>
@@ -576,9 +726,11 @@ export default function AdminDashboardPage() {
                                     value={replyContent}
                                     onChange={(e) => setReplyContent(e.target.value)}
                                     placeholder={`Nhập phản hồi tới ${selectedReport.senderEmail}...`}
-                                    className="w-full pl-4 pr-16 py-3 border border-gray-200 rounded-2xl outline-none focus:ring-2 focus:ring-primary focus:bg-white transition-all text-sm min-h-[100px] resize-y"
-                                ></textarea>
-                                <button onClick={handleSendReply} className="absolute bottom-3 right-3 p-2.5 bg-primary text-white rounded-xl hover:bg-primary-hover shadow-sm transition-colors" title="Gửi phản hồi"><Send className="w-5 h-5" /></button>
+                                    className="w-full pl-4 pr-16 py-3 border border-gray-200 rounded-2xl outline-none focus:ring-2 focus:ring-primary focus:bg-white transition-all text-sm min-h-[100px] resize-y">
+                                </textarea>
+                                <button onClick={handleSendReply} className="absolute bottom-3 right-3 p-2.5 bg-primary text-white rounded-xl hover:bg-primary-hover shadow-sm transition-colors" title="Gửi phản hồi">
+                                    <Send className="w-5 h-5" />
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -610,20 +762,36 @@ export default function AdminDashboardPage() {
                 </div>
             )}
 
-            {/* MODAL XÁC NHẬN HÀNH ĐỘNG USER (KICK / REMOVE PLAN) */}
+            {/* MODAL XÁC NHẬN HÀNH ĐỘNG CHUNG (KICK / REMOVE PLAN / UNLOCK TÀI KHOẢN) */}
             {userActionConfirm && (
                 <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setUserActionConfirm(null)}>
                     <div className="bg-white rounded-3xl w-full max-w-sm p-6 shadow-2xl relative animate-in fade-in zoom-in-95 text-center" onClick={e => e.stopPropagation()}>
-                        <div className="mx-auto w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mb-4"><AlertTriangle className="w-8 h-8 text-red-500" /></div>
+
+                        <div className={`mx-auto w-16 h-16 rounded-full flex items-center justify-center mb-4 ${userActionConfirm.action === 'unlock' ? 'bg-green-50' : 'bg-red-50'}`}>
+                            {userActionConfirm.action === 'unlock' ? (
+                                <Unlock className="w-8 h-8 text-green-500" />
+                            ) : (
+                                <AlertTriangle className="w-8 h-8 text-red-500" />
+                            )}
+                        </div>
+
                         <h3 className="text-lg font-bold text-gray-900 mb-2">Cảnh báo hệ thống</h3>
+
                         <p className="text-gray-500 text-sm mb-6">
                             {userActionConfirm.action === 'kick'
                                 ? "Bạn có chắc chắn muốn XÓA VĨNH VIỄN tài khoản này khỏi hệ thống? Hành động này không thể hoàn tác."
-                                : "Xác nhận thu hồi gói đăng ký Chủ trọ của tài khoản này?"}
+                                : userActionConfirm.action === 'remove_plan'
+                                    ? "Xác nhận thu hồi gói đăng ký Chủ trọ của tài khoản này?"
+                                    : "Bạn có chắc chắn muốn MỞ KHÓA cho tài khoản này? Người dùng sẽ có thể đăng nhập trở lại bình thường."}
                         </p>
+
                         <div className="flex gap-3">
                             <button onClick={() => setUserActionConfirm(null)} className="flex-1 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors">Hủy bỏ</button>
-                            <button onClick={confirmAdminAction} className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-sm transition-colors">
+
+                            <button
+                                onClick={confirmAdminAction}
+                                className={`flex-1 py-3 text-white font-bold rounded-xl shadow-sm transition-colors ${userActionConfirm.action === 'unlock' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}`}
+                            >
                                 Xác nhận
                             </button>
                         </div>
