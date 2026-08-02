@@ -365,7 +365,8 @@ export default function AdminDashboardPage() {
                                         <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Tìm tên, email, sđt..." className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-shadow bg-white" />
                                     </div>
                                     <div className="relative">
-                                        <button onClick={() => setOpenFilter(openFilter === 'sort' ? null : 'sort')} className={`flex items-center gap-2 px-3 py-2 bg-white border rounded-lg text-sm font-medium transition-colors ${openFilter === 'sort' ? 'border-primary text-primary' : 'border-gray-200 text-gray-700 hover:bg-gray-50'}`}><Filter className="w-4 h-4" /> Lọc A-Z</button>
+                                        <button onClick={() => setOpenFilter(openFilter === 'sort' ? null : 'sort')} className={`flex items-center gap-2 px-3 py-2 bg-white border rounded-lg text-sm font-medium transition-colors ${openFilter === 'sort' ? 'border-primary text-primary' : 'border-gray-200 text-gray-700 hover:bg-gray-50'}`}>
+                                            <Filter className="w-4 h-4" /> Lọc A-Z</button>
                                         {openFilter === 'sort' && (
                                             <div className="absolute top-full left-0 mt-1 w-44 bg-white border border-gray-100 shadow-xl rounded-xl z-50 py-2 animate-in fade-in slide-in-from-top-2 duration-200">
                                                 <button onClick={() => { setSortOrder('az'); setOpenFilter(null); }} className={`w-full text-left px-4 py-2 text-sm flex items-center gap-2 hover:bg-primary/5 ${sortOrder === 'az' ? 'text-primary font-bold bg-primary/5' : 'text-gray-700'}`}><ArrowDownAZ className="w-4 h-4"/> Từ A đến Z</button>

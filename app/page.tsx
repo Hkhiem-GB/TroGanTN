@@ -1,6 +1,6 @@
 // src/app/page.tsx
 import HeroBanner from '@/components/home/HeroBanner';
-import RoomCard from '@/components/common/RoomCard';
+import RoomCard, { RoomProps as Room } from '@/components/common/RoomCard';
 
 // Hàm gọi API lấy dữ liệu (Chạy trên Server)
 async function getRooms() {

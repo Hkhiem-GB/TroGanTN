@@ -3,18 +3,34 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import {LogOut, HelpCircle, User, Crown, ShieldAlert, Flag, Shield} from 'lucide-react';
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, Suspense } from "react";
 import { signIn, signOut, useSession } from "next-auth/react";
 import { useSearchParams, useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import NotificationBell from './NotificationBell';
 
-export default function Header() {
-    const { data: session, status } = useSession();
-
-    // Khởi tạo router và searchParams để bắt lỗi từ URL
+// --- Component con chuyên xử lý searchParams để tránh lỗi build Suspense ---
+function SearchParamsHandler() {
     const searchParams = useSearchParams();
     const router = useRouter();
+
+    useEffect(() => {
+        const error = searchParams?.get('error');
+
+        if (error === 'AccountLocked') {
+            toast.error('Đăng nhập thất bại: Tài khoản của bạn đã bị quản trị viên khóa do vi phạm chính sách.');
+            router.replace('/', { scroll: false });
+        } else if (error === 'Default') {
+            toast.error('Có lỗi xảy ra trong quá trình đăng nhập. Vui lòng thử lại!');
+            router.replace('/', { scroll: false });
+        }
+    }, [searchParams, router]);
+
+    return null;
+}
+
+export default function Header() {
+    const { data: session, status } = useSession();
 
     const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
     const dropdownRef = useRef<HTMLDivElement>(null);
@@ -30,20 +46,6 @@ export default function Header() {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    // Xử lý hiển thị thông báo lỗi nếu có param "error" trên URL
-    useEffect(() => {
-        const error = searchParams?.get('error');
-
-        if (error === 'AccountLocked') {
-            toast.error('Đăng nhập thất bại: Tài khoản của bạn đã bị quản trị viên khóa do vi phạm chính sách.');
-            // Xóa chữ ?error=AccountLocked trên thanh địa chỉ để url gọn gàng
-            router.replace('/', { scroll: false });
-        } else if (error === 'Default') {
-            toast.error('Có lỗi xảy ra trong quá trình đăng nhập. Vui lòng thử lại!');
-            router.replace('/', { scroll: false });
-        }
-    }, [searchParams, router]);
-
     const userRole = (session?.user as { role?: string })?.role;
     const isAdmin = userRole === 'ADMIN';
     const isLandlord = userRole === 'LANDLORD';
@@ -51,6 +53,11 @@ export default function Header() {
 
     return (
         <header className="sticky top-0 z-50 w-full bg-white border-b border-gray-100 shadow-sm">
+            {/* Bọc component xử lý searchParams vào Suspense để fix lỗi build Next.js */}
+            <Suspense fallback={null}>
+                <SearchParamsHandler />
+            </Suspense>
+
             <div className="container mx-auto px-4 h-16 flex items-center justify-between">
 
                 <Link href="/" className="flex items-center gap-2 text-2xl font-bold text-primary tracking-tight">
