@@ -1,21 +1,29 @@
 import PusherServer from 'pusher';
 import PusherClient from 'pusher-js';
 
+const pusherAppId = process.env.PUSHER_APP_ID;
+const pusherKey = process.env.NEXT_PUBLIC_PUSHER_APP_KEY;
+const pusherSecret = process.env.PUSHER_SECRET;
+const pusherCluster = process.env.NEXT_PUBLIC_PUSHER_CLUSTER;
+
+const isPusherConfigured = Boolean(pusherAppId && pusherKey && pusherSecret && pusherCluster);
+
 // Dùng cho Backend (API Routes) để "bắn" thông báo
-export const pusherServer = new PusherServer({
-    appId: process.env.PUSHER_APP_ID!,
-    key: process.env.NEXT_PUBLIC_PUSHER_APP_KEY!,
-    secret: process.env.PUSHER_SECRET!,
-    cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER!,
-    useTLS: true
-});
+export const pusherServer = isPusherConfigured
+    ? new PusherServer({
+        appId: pusherAppId!,
+        key: pusherKey!,
+        secret: pusherSecret!,
+        cluster: pusherCluster!,
+        useTLS: true,
+    })
+    : null;
 
 PusherClient.logToConsole = true;
 
 // Dùng cho Frontend (Components) để "nghe" thông báo
-export const pusherClient = new PusherClient(
-    process.env.NEXT_PUBLIC_PUSHER_APP_KEY!,
-    {
-        cluster: process.env.NEXT_PUBLIC_PUSHER_CLUSTER!
-    }
-);
+export const pusherClient = pusherKey && pusherCluster
+    ? new PusherClient(pusherKey, {
+        cluster: pusherCluster,
+    })
+    : null;

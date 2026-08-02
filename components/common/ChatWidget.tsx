@@ -80,6 +80,8 @@ export default function ChatWidget({
     useEffect(() => {
         if (!currentUserId || !receiverId) return;
 
+        if (!pusherClient) return;
+
         const channel = pusherClient.subscribe(currentUserId);
 
         const handleNewMessage = (incomingMsg: DBRawMessage) => {

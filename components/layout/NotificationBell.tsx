@@ -72,6 +72,8 @@ export default function NotificationBell() {
         // eslint-disable-next-line react-hooks/set-state-in-effect
         fetchNotifications();
 
+        if (!pusherClient) return;
+
         const channel = pusherClient.subscribe(currentUserId);
 
         channel.bind('new-notification', (newNotif: NotificationItem) => {

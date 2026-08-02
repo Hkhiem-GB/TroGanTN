@@ -23,16 +23,20 @@ declare module "next-auth/jwt" {
 }
 
 // Cấu hình Transporter cho Nodemailer
-const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-    },
-});
+const transporter = process.env.EMAIL_USER && process.env.EMAIL_PASS
+    ? nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+            user: process.env.EMAIL_USER,
+            pass: process.env.EMAIL_PASS,
+        },
+    })
+    : null;
 
 // Hàm hỗ trợ gửi email chào mừng
 async function sendWelcomeEmail(to: string, name: string) {
+    if (!transporter) return;
+
     try {
         await transporter.sendMail({
             from: `"TroGanTN" <${process.env.EMAIL_USER}>`,
@@ -60,13 +64,16 @@ async function sendWelcomeEmail(to: string, name: string) {
     }
 }
 
+const googleClientId = process.env.GOOGLE_CLIENT_ID;
+const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
+
 export const authOptions: NextAuthOptions = {
-    providers: [
+    providers: googleClientId && googleClientSecret ? [
         GoogleProvider({
-            clientId: process.env.GOOGLE_CLIENT_ID as string,
-            clientSecret: process.env.GOOGLE_CLIENT_SECRET as string,
+            clientId: googleClientId,
+            clientSecret: googleClientSecret,
         }),
-    ],
+    ] : [],
     callbacks: {
         async signIn({ user, account }) {
             if (account?.provider === "google") {
@@ -139,5 +146,5 @@ export const authOptions: NextAuthOptions = {
             return session;
         }
     },
-    secret: process.env.NEXTAUTH_SECRET,
+    secret: process.env.NEXTAUTH_SECRET || 'development-secret',
 };

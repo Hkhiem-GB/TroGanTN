@@ -79,13 +79,15 @@ export async function POST(req: Request) {
             } : null
         };
 
-        // 6. Bắn Pusher Realtime
-        await pusherServer.trigger(
-            receiverId.toString(),
-            'new-notification',
-            notificationPayload
-        );
-        await pusherServer.trigger(receiverId.toString(), 'new-message', newMessage);
+        // 6. Bắn Pusher Realtime (nếu đã cấu hình)
+        if (pusherServer) {
+            await pusherServer.trigger(
+                receiverId.toString(),
+                'new-notification',
+                notificationPayload
+            );
+            await pusherServer.trigger(receiverId.toString(), 'new-message', newMessage);
+        }
 
         return NextResponse.json({ success: true, data: newMessage });
 

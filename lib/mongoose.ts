@@ -1,11 +1,7 @@
 // src/lib/mongoose.ts
 import mongoose from 'mongoose';
 
-const MONGODB_URI = process.env.MONGODB_URI!;
-
-if (!MONGODB_URI) {
-    throw new Error('Vui lòng định nghĩa biến môi trường MONGODB_URI trong file .env.local');
-}
+const MONGODB_URI = process.env.MONGODB_URI;
 
 // Caching connection để dùng lại trong môi trường phát triển (Hot Reload)
 let cached = (global as any).mongoose;
@@ -15,6 +11,10 @@ if (!cached) {
 }
 
 export async function connectToDatabase() {
+    if (!MONGODB_URI) {
+        throw new Error('Vui lòng định nghĩa biến môi trường MONGODB_URI trong file .env.local');
+    }
+
     if (cached.conn) {
         return cached.conn;
     }
